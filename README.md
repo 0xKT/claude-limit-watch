@@ -100,16 +100,25 @@ dry pass and the chain test, and starts the loop. See [SKILL.md](SKILL.md).
 
 ## Quick start
 
-```bash
-umask 077; printf 'OPENROUTER_API_KEY=sk-or-v1-...\n' > ~/.claude/limit-watch.env
+Three steps arm the watcher. Skip the middle one and the loop still starts, polls and logs -- it just has
+nothing registered to nudge, which is what the line under `limit-watch started` then tells you.
 
+```bash
+umask 077; printf 'OPENROUTER_API_KEY=sk-or-v1-...\n' > ~/.claude/limit-watch.env   # 1. credential
+
+claude-limit-watch watch --all                 # 2. register; or: watch <name> "<resume message>"
+
+nohup claude-limit-watch run >> ~/.claude/limit-watch.log 2>&1 &                    # 3. loop
+tail -f ~/.claude/limit-watch.log              # expect: watching every live session
+```
+
+Optional checks, none of which arm anything:
+
+```bash
 claude-limit-watch status                      # live sessions and what the loop would do now
-claude-limit-watch watch --all                 # or: watch <name> "<resume message>"
+claude-limit-watch list                        # what is registered
 claude-limit-watch run --once --dry-run        # one pass, logs only, never sends
 claude-limit-watch send <name> "limit-watch chain test, please ignore"   # one paid turn, run while NOT limited
-
-nohup claude-limit-watch run >> ~/.claude/limit-watch.log 2>&1 &
-tail -f ~/.claude/limit-watch.log
 ```
 
 Optional, survive reboots (macOS):
@@ -118,6 +127,8 @@ Optional, survive reboots (macOS):
 claude-limit-watch launchd-plist > ~/Library/LaunchAgents/com.user.claude-limit-watch.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.claude-limit-watch.plist
 ```
+
+The LaunchAgent runs the loop only; registrations come from `watch` and persist in `limit-watch.json`.
 
 ## Commands
 
@@ -164,8 +175,10 @@ Process environment variables:
 
 ## Reading the log
 
-Every line other than the 30-minute heartbeat `alive: N live, N watched` is a state change. The decision
-column of `status` and the arrow in the log use these reasons:
+Every line other than the 30-minute heartbeat `alive: N live, N watched` is a state change. The first one
+a fresh loop logs is its registry coverage -- `watching every live session`, `watching N registered
+session(s)`, or `no registered sessions, nothing will be nudged` -- and it reappears whenever that
+changes. The decision column of `status` and the arrow in the log use these reasons:
 
 | Decision | Meaning |
 |---|---|
@@ -183,6 +196,9 @@ column of `status` and the arrow in the log use these reasons:
 
 ## Troubleshooting
 
+- **The loop runs but nothing is ever nudged.** Nothing is registered: `run` logs `no registered sessions`
+  at startup and `status` shows `skip: not-registered` on every row. Run `claude-limit-watch watch --all`;
+  the running loop rereads the registry every pass, so it takes effect within one poll, no restart.
 - **`already running (pid N)` on start.** A loop already holds the lock; the new one exits without touching
   anything. Point `CLAUDE_LIMIT_WATCH_STATE_DIR` elsewhere to experiment beside a live loop.
 - **`delivered` but no `confirmed` line.** The receiver has not written the nudge to its transcript yet.
