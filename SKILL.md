@@ -37,7 +37,7 @@ Sub-command from `$ARGUMENTS`: `install` (default when empty), `status`, `test`,
    claude-limit-watch selftest
    claude-limit-watch status
    ```
-   `selftest` must end with `17/17 fixtures passed, 6/6 mutations caught`.
+   `selftest` must end with `18/18 fixtures passed, 7/7 mutations caught`.
 3. Credential. Ask which credential the user wants to spend on nudges (OpenRouter is the cheapest verified
    route; an Anthropic API key also works). Then give them this to run themselves, with their key filled in:
    ```bash

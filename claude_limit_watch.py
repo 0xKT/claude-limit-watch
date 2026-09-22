@@ -419,6 +419,24 @@ def save_registry(path: Path, reg: dict, now: Optional[float] = None) -> None:
         raise
 
 
+def coverage_note(reg: dict) -> tuple[str, str]:
+    """(state key, line) describing how much of this machine the registry covers.
+
+    An empty registry is the one misconfiguration the loop cannot report later: it
+    polls, decides and logs exactly as usual, and skips every session as
+    not-registered, so the coverage has to be stated up front.
+    """
+    if reg.get("watch_all"):
+        return "watch-all", "watching every live session"
+    count = len(reg.get("sessions") or {})
+    if count:
+        return f"registered-{count}", f"watching {count} registered session(s)"
+    return (
+        "empty",
+        "no registered sessions, nothing will be nudged: run 'claude-limit-watch watch --all'",
+    )
+
+
 def attempt_key(session_id: str, resets_at: int) -> str:
     return f"{session_id}:{resets_at}"
 
@@ -770,6 +788,7 @@ def cycle(
     now = time.time() if now is None else now
     logger = logger or Logger()
     reg = load_registry(paths.registry)
+    logger.state("registry", *coverage_note(reg))
     file_env, warnings = load_env_file(paths.env_file)
     cfg = build_sender_config(process_env if process_env is not None else dict(os.environ), file_env, warnings)
     for warning in cfg.warnings:
@@ -1516,11 +1535,32 @@ def st_unknown_never_sends(fx: Fixture) -> None:
     _check(len(lines) == 3, f"unknown logged once per state, got {len(lines)}")
 
 
+def st_empty_registry_is_announced(fx: Fixture) -> None:
+    s, _ = _stuck_session(fx)
+    buf = tempfile.SpooledTemporaryFile(mode="w+")
+    fx.log = Logger(out=buf)
+    _check(not fx.run(), "an unregistered session produces no event")
+    _check(not fx.sent, "an unregistered session is never nudged")
+    buf.seek(0)
+    empty_log = buf.read()
+    _check("nothing will be nudged" in empty_log, f"empty registry unannounced: {empty_log!r}")
+    _check("watch --all" in empty_log, f"empty registry states no remedy: {empty_log!r}")
+    fx.register(watch_all=True)
+    buf = tempfile.SpooledTemporaryFile(mode="w+")
+    fx.log = Logger(out=buf)
+    _check(len(fx.run()) == 1, "a registered session is processed")
+    buf.seek(0)
+    covered_log = buf.read()
+    _check("nothing will be nudged" not in covered_log, f"warning outlived the fix: {covered_log!r}")
+    _check("watching every live session" in covered_log, f"coverage unstated: {covered_log!r}")
+
+
 SELFTESTS = [
     st_candidate_sends, st_completed_after_limit_skips, st_user_and_tool_use_skip, st_noise_and_sidechain,
     st_deep_tail, st_api_error_and_text_fallback, st_timing_gates, st_busy_gates, st_attempt_cap_and_spacing,
     st_failed_send_counts, st_confirmed_marker, st_credential_gate, st_dry_run_and_watch_all, st_sender_config,
     st_sender_plumbing, st_registry_and_resolution, st_unknown_never_sends,
+    st_empty_registry_is_announced,
 ]
 
 MUTATIONS = [
@@ -1530,6 +1570,7 @@ MUTATIONS = [
     ("busy gate", "busy_blocks", lambda session, ts: False, st_busy_gates),
     ("resetsAt timing", "reset_passed", lambda now, resets_at: True, st_timing_gates),
     ("failure counting", "counts_toward_cap", lambda attempt: attempt.get("outcome") == "delivered", st_failed_send_counts),
+    ("registry coverage", "coverage_note", lambda reg: ("watch-all", "watching every live session"), st_empty_registry_is_announced),
 ]
 
 
